@@ -42,21 +42,28 @@ class PaperStepSequencer:
         # Detect the markers in the image
         markerCorners, markerIds, rejectedCandidates = cv.aruco.detectMarkers(frame, aruco_dict, parameters=aruco_param)
 
-        if markerIds is None or len(markerIds) == 0:
+        if markerIds is None:
+            print("markerIds is None")
+            return None
+        elif len(markerIds)==0:
+            print("len(markerIds)==0")
             return None
 
         # filter out unknown markers
         inds = [i for i, mid in enumerate(markerIds) if mid[0] in ar_ids]
         markerCorners = [markerCorners[ind] for ind in inds]
         markerIds = [markerIds[ind] for ind in inds]
-        if len(markerIds) != 4:
-            return None
-        if any([ar_id not in markerIds for ar_id in ar_ids]):
-            return None
 
-        # markerCorners, markerIds = detect_markers(frame, aruco_dict, ar_ids)
         markerCorners = [c[0] for c in markerCorners]
         markerIds = [i[0] for i in markerIds]
+
+        if len(markerIds) != 4:
+            print("missing:", set(ar_ids).difference(markerIds))
+            return None
+        if any([ar_id not in markerIds for ar_id in ar_ids]):
+            print("any([ar_id not in markerIds for ar_id in ar_ids])")
+            return None
+
         corners_screen = []
         for i, ar_id in enumerate(ar_ids):
             ind = markerIds.index(ar_id)
@@ -109,7 +116,7 @@ class PaperStepSequencer:
         corners_screen = PaperStepSequencer.detect_screen_corners(
             frame, self.aruco_dict, self.aruco_param, self.ar_ids)
         if corners_screen is None:
-            return frame
+            return None
 
         # draw grid on frame to make sure the area is well detected
         frame_feedback = PaperStepSequencer.draw_screen_feedback(
@@ -124,35 +131,53 @@ class PaperStepSequencer:
         # cv.waitKey(0)
         # cv.imwrite("output/warped.png", frame_warped)
 
-        return frame_feedback
+        return frame_feedback, frame_warped
 
     def run(self):
         cam = cv.VideoCapture(0)
 
-        cv.namedWindow("test")
+        cv.namedWindow("Camera")
+        cv.namedWindow("Warped")
 
         img_counter = 0
 
+        update_requested = False
+        frame_is_valid = True
+
+        ret, frame = cam.read()
+
         while True:
             ret, frame = cam.read()
-            frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-            frame_feedback = self.process_frame(frame)
-
-            cv.imshow("test", frame_feedback)
             if not ret:
                 break
-            k = cv.waitKey(1)
 
+            frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+            ret = self.process_frame(frame)
+            frame_is_valid = ret is not None
+            if frame_is_valid:
+                frame_feedback, frame_warped = ret
+                cv.imshow("Camera", frame_feedback)
+                cv.imshow("Warped", frame_warped)
+            else:
+                cv.imshow("Camera", frame)
+
+            if update_requested and frame_is_valid:
+                update_requested = False
+                img_name = f"opencv_frame_{img_counter}.png"
+                cv.imwrite(img_name, frame)
+                print(f"{img_name} written!")
+                img_counter += 1
+
+            k = cv.waitKey(50)
             if k % 256 == 27:
                 # ESC pressed
                 print("Escape hit, closing...")
                 break
             elif k % 256 == 32:
                 # SPACE pressed
-                img_name = f"opencv_frame_{img_counter}.png"
-                cv.imwrite(img_name, frame)
-                print(f"{img_name} written!")
-                img_counter += 1
+                update_requested = True
+
 
         cam.release()
         cv.destroyAllWindows()
