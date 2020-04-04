@@ -105,11 +105,38 @@ class PaperStepSequencer:
         return frame
 
     def run_offline(self):
+        cv.namedWindow("Camera")
+        cv.namedWindow("Warped")
+
         # get src image and store point source coordinate system
         # frame = np.asarray(Image.open("frames/frame0.jpg").convert('L'))
         frame = cv.imread("frames/frame0.jpg", 0)
+        frame_feedback, frame_warped = self.process_frame(frame)
 
-        self.process_frame(frame)
+        cv.imshow("Camera", frame_feedback)
+        cv.imshow("Warped", frame_warped)
+        cv.waitKey(0)
+
+    def detect_coins(self, warped):
+        warped = warped.copy()
+        # Blur the image to reduce noise
+        img_blur = cv.medianBlur(warped, 1)
+        # Apply hough transform on the image
+        circles = cv.HoughCircles(img_blur, cv.HOUGH_GRADIENT, 1, img_blur.shape[0] / 64, param1=200, param2=10,
+                                   minRadius=20, maxRadius=25)
+        warped = img_blur
+        warped = cv.cvtColor(warped, cv.COLOR_GRAY2BGR)
+        # Draw detected circles
+        if circles is not None:
+            circles = np.uint16(np.around(circles))[0]
+            centers =
+
+            for i in circles[0, :]:
+                # Draw outer circle
+                cv.circle(warped, (i[0], i[1]), i[2], (0, 255, 0), 2)
+                # Draw inner circle
+                cv.circle(warped, (i[0], i[1]), 2, (0, 0, 255), 3)
+        return warped
 
     def process_frame(self, frame):
         # detect area corner on the screen
