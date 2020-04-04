@@ -73,6 +73,34 @@ def draw_screen_feedback(frame, corners_screen, corners_world, world_w, world_h)
     cv.imwrite("output/screen_feedback.png", frame)
 
 
+def main_cam():
+    cam = cv.VideoCapture(0)
+
+    cv.namedWindow("test")
+
+    img_counter = 0
+
+    while True:
+        ret, frame = cam.read()
+        cv.imshow("test", frame)
+        if not ret:
+            break
+        k = cv.waitKey(1)
+
+        if k % 256 == 27:
+            # ESC pressed
+            print("Escape hit, closing...")
+            break
+        elif k % 256 == 32:
+            # SPACE pressed
+            img_name = f"opencv_frame_{img_counter}.png"
+            cv.imwrite(img_name, frame)
+            print(f"{img_name} written!")
+            img_counter += 1
+
+    cam.release()
+    cv.destroyAllWindows()
+
 def main():
     # load predefined dictionary
     ar_ids = [11, 22, 33, 44]
@@ -101,4 +129,4 @@ def main():
     print("done")
 
 if __name__ == '__main__':
-    main()
+    main_cam()
