@@ -21,6 +21,7 @@ class PaperStepSequencer:
             [0, self.world_h]
         ])
 
+
     @staticmethod
     def init_markers(ar_ids):
         # initialise directories
@@ -41,10 +42,17 @@ class PaperStepSequencer:
         # Detect the markers in the image
         markerCorners, markerIds, rejectedCandidates = cv.aruco.detectMarkers(frame, aruco_dict, parameters=aruco_param)
 
+        if markerIds is None or len(markerIds) == 0:
+            return None
+
         # filter out unknown markers
         inds = [i for i, mid in enumerate(markerIds) if mid[0] in ar_ids]
         markerCorners = [markerCorners[ind] for ind in inds]
         markerIds = [markerIds[ind] for ind in inds]
+        if len(markerIds) != 4:
+            return None
+        if any([ar_id not in markerIds for ar_id in ar_ids]):
+            return None
 
         # markerCorners, markerIds = detect_markers(frame, aruco_dict, ar_ids)
         markerCorners = [c[0] for c in markerCorners]
@@ -84,9 +92,10 @@ class PaperStepSequencer:
         frame = np.stack([frame, frame, frame], axis=2)
         cv.polylines(frame, lines, True, (0, 255, 0))
 
-        cv.imshow("screen_feedback.png", frame)
-        cv.waitKey(0)
-        cv.imwrite("output/screen_feedback.png", frame)
+        # cv.imshow("screen_feedback.png", frame)
+        # cv.waitKey(0)
+        # cv.imwrite("output/screen_feedback.png", frame)
+        return frame
 
     def run_offline(self):
         # get src image and store point source coordinate system
@@ -99,21 +108,23 @@ class PaperStepSequencer:
         # detect area corner on the screen
         corners_screen = PaperStepSequencer.detect_screen_corners(
             frame, self.aruco_dict, self.aruco_param, self.ar_ids)
+        if corners_screen is None:
+            return frame
 
         # draw grid on frame to make sure the area is well detected
-        PaperStepSequencer.draw_screen_feedback(
+        frame_feedback = PaperStepSequencer.draw_screen_feedback(
             frame, corners_screen, self.corners_world, self.world_w, self.world_h)
 
         # world to screen homography
         w_from_s, status = cv.findHomography(corners_screen, self.corners_world)
         # Warp source image to destination based on homography
         frame_warped = cv.warpPerspective(frame, w_from_s, (self.world_w, self.world_h))
-        cv.imshow("warped.png", frame_warped)
-        cv.waitKey(0)
-        cv.imwrite("output/warped.png", frame_warped)
 
-        print("done")
+        # cv.imshow("warped.png", frame_warped)
+        # cv.waitKey(0)
+        # cv.imwrite("output/warped.png", frame_warped)
 
+        return frame_feedback
 
     def run(self):
         cam = cv.VideoCapture(0)
@@ -124,7 +135,10 @@ class PaperStepSequencer:
 
         while True:
             ret, frame = cam.read()
-            cv.imshow("test", frame)
+            frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+            frame_feedback = self.process_frame(frame)
+
+            cv.imshow("test", frame_feedback)
             if not ret:
                 break
             k = cv.waitKey(1)
@@ -145,4 +159,4 @@ class PaperStepSequencer:
 
 if __name__ == '__main__':
     pss = PaperStepSequencer()
-    pss.run_offline()
+    pss.run()
