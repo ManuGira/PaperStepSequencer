@@ -14,12 +14,20 @@ class PaperStepSequencer:
 
         self.world_h = 480
         self.world_w = 710
+        self.margin = 60
         self.corners_world = np.array([
             [0, 0],
             [self.world_w, 0],
             [self.world_w, self.world_h],
             [0, self.world_h]
         ])
+
+        # top left corner of the grid
+        self.grid_pos_xy = np.array([160, 180])
+        # size in warped pixel of a grid square
+        self.grid_square_size = 60
+        # dimensionality of the grid
+        self.grid_dim_xy = [8, 4]
 
 
     @staticmethod
@@ -58,7 +66,7 @@ class PaperStepSequencer:
         markerIds = [i[0] for i in markerIds]
 
         if len(markerIds) != 4:
-            print("missing:", set(ar_ids).difference(markerIds))
+            # print("missing:", set(ar_ids).difference(markerIds))
             return None
         if any([ar_id not in markerIds for ar_id in ar_ids]):
             print("any([ar_id not in markerIds for ar_id in ar_ids])")
@@ -105,11 +113,112 @@ class PaperStepSequencer:
         return frame
 
     def run_offline(self):
+        cv.namedWindow("Camera")
+        cv.namedWindow("Warped")
+
         # get src image and store point source coordinate system
         # frame = np.asarray(Image.open("frames/frame0.jpg").convert('L'))
         frame = cv.imread("frames/frame0.jpg", 0)
+        frame_feedback, frame_warped = self.process_frame(frame)
 
-        self.process_frame(frame)
+        cv.imshow("Camera", frame_feedback)
+        cv.imshow("Warped", frame_warped)
+        cv.waitKey(0)
+
+    @staticmethod
+    def detect_coins(warped, margin):
+        warped = warped.copy()
+        h, w = warped.shape[0], warped.shape[1]
+
+        # Blur the image to reduce noise
+        img_blur = cv.medianBlur(warped, 5)
+        # Apply hough transform on the image
+        circles = cv.HoughCircles(img_blur, cv.HOUGH_GRADIENT, 1, img_blur.shape[0] / 64, param1=200, param2=10,
+                                   minRadius=20, maxRadius=30) # TODO: radius function of cm
+        warped = cv.cvtColor(warped, cv.COLOR_GRAY2BGR)
+        centers = []
+        if circles is None:
+            return warped, centers
+        circles = circles[0]
+
+        # filter out circle of which center is out of the ROI
+        radius = []
+        centers = []
+        for c in circles:
+            cx, cy, r = c
+            if not margin < cx < w - margin:
+                continue
+            if not margin < cy < h - margin:
+                continue
+            centers.append([cx, cy])
+            radius.append(r)
+
+        # join overlapping circle (when centers overlapp another circle)
+        restart = True
+        while restart:
+            restart = False
+            for i in range(len(radius)-1):
+                for j in range(i+1, len(radius)):
+                    distance = ((centers[i][0]-centers[j][0])**2 + (centers[i][1]-centers[j][1])**2)**0.5
+                    if distance < max(radius[i], radius[j]):
+                        r = max(radius[i], radius[j])
+                        cx = 0.5*centers[i][0] + 0.5*centers[j][0]
+                        cy = 0.5*centers[i][1] + 0.5*centers[j][1]
+                        radius = [radius[k] for k in range(len(radius)) if k != i and k != j]
+                        centers = [centers[k] for k in range(len(centers)) if k != i and k != j]
+                        radius.append(r)
+                        centers.append([cx, cy])
+                        restart = True
+                        break
+                if restart:
+                    break
+
+        # Draw detected circles
+        radius = np.uint16(np.around(radius))
+        centers = np.uint16(np.around(centers))
+        for i in range(len(radius)):
+            r = radius[i]
+            cx, cy = centers[i]
+            # Draw outer circle
+            cv.circle(warped, (cx, cy), r, (0, 255, 0), 2)
+            # Draw inner circle
+            cv.circle(warped, (cx, cy), 2, (0, 0, 255), 3)
+        return warped, centers
+
+    def get_grid_inputs(self, centers, frame_warped):
+        frame_tmp = frame_warped.copy()
+
+        entries = np.array(centers)
+        entries = (entries - self.grid_pos_xy) / self.grid_square_size
+        entries = np.int32(np.floor(entries))
+
+        entries += 1
+        entries = [en for en in entries if min(en) >= 1]
+        entries = [en for en in entries if en[0] <= self.grid_dim_xy[0]]
+        entries = [en for en in entries if en[1] <= self.grid_dim_xy[1]]
+
+        # recover top left corner of highlighted squares
+        squares_pos = np.array(entries) -1
+        squares_pos = squares_pos * self.grid_square_size + self.grid_pos_xy
+        # compute coordinates of 4 corners
+        squares = []
+        for sq in squares_pos:
+            x, y = np.int32(sq)
+            d = np.int32(self.grid_square_size)
+            square_corners = [[  x,   y],
+                       [x+d,   y],
+                       [x+d, y+d],
+                       [  x, y+d]
+                    ]
+            squares.append(np.array(square_corners))
+        cv.polylines(frame_tmp, squares, True, (255, 0, 0))
+        frame_warped = np.uint8(0.5*np.float32(frame_warped) + 0.5*np.float32(frame_tmp))
+
+        entries = [list(en) for en in entries]
+        print(entries)
+        return entries, frame_warped
+
+
 
     def process_frame(self, frame):
         # detect area corner on the screen
@@ -125,7 +234,12 @@ class PaperStepSequencer:
         # world to screen homography
         w_from_s, status = cv.findHomography(corners_screen, self.corners_world)
         # Warp source image to destination based on homography
+        margin = 60
         frame_warped = cv.warpPerspective(frame, w_from_s, (self.world_w, self.world_h))
+
+        frame_warped, centers = PaperStepSequencer.detect_coins(frame_warped, self.margin)
+        if len(centers) > 0:
+            entries, frame_warped = self.get_grid_inputs(centers, frame_warped)
 
         # cv.imshow("warped.png", frame_warped)
         # cv.waitKey(0)
@@ -184,4 +298,5 @@ class PaperStepSequencer:
 
 if __name__ == '__main__':
     pss = PaperStepSequencer()
+    # pss.run_offline()
     pss.run()
