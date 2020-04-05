@@ -39,7 +39,8 @@ class PaperStepSequencer:
         self.midiplayer = midiplayer.MidiPlayer()
 
         self.entries = []
-        self.entries_grid = np.zeros(self.grid_dim_xy.transpose(), dtype=np.uint8)
+        self.entries_grid = np.zeros(self.grid_dim_xy).transpose()
+        self.entries_max_hit = 9
 
 
 
@@ -210,10 +211,25 @@ class PaperStepSequencer:
         entries = [en for en in entries if en[0] <= self.grid_dim_xy[0] -1]
         entries = [en for en in entries if en[1] <= self.grid_dim_xy[1] -1]
 
+        print(centers)
+        print(entries)
         if len(entries) == 0:
             return [], frame_warped
 
-        print(entries)
+        for entry in entries:
+            ex, ey = entry
+            self.entries_grid[ey, ex] += 2
+        self.entries_grid -= 1
+        self.entries_grid[self.entries_grid < 0] = 0
+        self.entries_grid[self.entries_grid > self.entries_max_hit] = self.entries_max_hit
+
+        entries = []
+        for ex in range(self.grid_dim_xy[0]):
+            for ey in range(self.grid_dim_xy[1]):
+                if self.entries_grid[ey, ex] >= self.entries_max_hit-3:
+                    entries.append([ex, ey])
+        if len(entries) == 0:
+            return [], frame_warped
 
         # recover top left corner of highlighted squares
         squares_pos = np.array(entries)  # -1
