@@ -2,15 +2,18 @@ import cv2 as cv
 import numpy as np
 # from PIL import Image
 import os
+from multiprocessing import Process
+import time
 
 
 class PaperStepSequencer:
     def __init__(self):
         # load predefined dictionary
         self.ar_ids = [11, 22, 33, 44]
-        self.aruco_dict = PaperStepSequencer.init_markers(self.ar_ids)
+        # self.aruco_dict = PaperStepSequencer.init_markers(self.ar_ids)
+        PaperStepSequencer.init_markers(self.ar_ids)
         # Initialize the detector parameters using default values
-        self.aruco_param = cv.aruco.DetectorParameters_create()
+        # self.aruco_param = cv.aruco.DetectorParameters_create()
 
         self.world_h = 480
         self.world_w = 710
@@ -27,7 +30,11 @@ class PaperStepSequencer:
         # size in warped pixel of a grid square
         self.grid_square_size = 60
         # dimensionality of the grid
-        self.grid_dim_xy = [8, 4]
+        self.grid_dim_xy = np.array([8, 4])
+        self.grid = np.zeros(self.grid_dim_xy.transpose(), dtype=np.uint8)
+
+        self.bpm = 120
+        self.steps_per_beats = 4
 
 
     @staticmethod
@@ -43,7 +50,7 @@ class PaperStepSequencer:
             markerImage = np.zeros((200, 200), dtype=np.uint8)
             cv.aruco.drawMarker(dictionary, ar_id, 200, markerImage, 1)
             cv.imwrite(f"{markers_dir}/marker{ar_id}.png", markerImage)
-        return dictionary
+        # return dictionary
 
     @staticmethod
     def detect_screen_corners(frame, aruco_dict, aruco_param, ar_ids):
@@ -218,12 +225,45 @@ class PaperStepSequencer:
         print(entries)
         return entries, frame_warped
 
+    def run_midi(self):
+        grid_length = self.grid_dim_xy[0]
+
+        # unit in seconds
+        one_step_period = 60/self.bpm/4
+        full_grid_period = one_step_period*self.grid_dim_xy[0]
+        beat_period = 60 / self.bpm  # seconds (0.5)
+        one_step_period = beat_period / self.steps_per_beats  # (0.125)
+        full_grid_period = one_step_period * grid_length  # (2.0)
+
+        tss = []
+        prev_step = -1
+        while True:
+            ts = time.time()
+            step_ts = (ts % full_grid_period) / one_step_period
+            step = int(step_ts)
+            if step == prev_step:
+                step += 1
+            if step % grid_length != (prev_step + 1) % grid_length:
+                print("ERROR")
+            prev_step = step
+            to_wait = (step + 1 - step_ts) * one_step_period
+
+            # cv.waitKey(int(to_wait * 1000))
+            time.sleep(to_wait)
+
+            ts2 = time.time()
+            tss.append(ts2)
+            print("step:", step, ", to wait: ", to_wait)
+
 
 
     def process_frame(self, frame):
+        aruco_dict = cv.aruco.Dictionary_get(cv.aruco.DICT_4X4_50)
+        aruco_param = cv.aruco.DetectorParameters_create()
+
         # detect area corner on the screen
         corners_screen = PaperStepSequencer.detect_screen_corners(
-            frame, self.aruco_dict, self.aruco_param, self.ar_ids)
+            frame, aruco_dict, aruco_param, self.ar_ids)
         if corners_screen is None:
             return None
 
@@ -239,7 +279,9 @@ class PaperStepSequencer:
 
         frame_warped, centers = PaperStepSequencer.detect_coins(frame_warped, self.margin)
         if len(centers) > 0:
-            entries, frame_warped = self.get_grid_inputs(centers, frame_warped)
+            self.entries, frame_warped = self.get_grid_inputs(centers, frame_warped)
+
+
 
         # cv.imshow("warped.png", frame_warped)
         # cv.waitKey(0)
@@ -283,7 +325,7 @@ class PaperStepSequencer:
                 print(f"{img_name} written!")
                 img_counter += 1
 
-            k = cv.waitKey(50)
+            k = cv.waitKey(1)
             if k % 256 == 27:
                 # ESC pressed
                 print("Escape hit, closing...")
@@ -299,4 +341,11 @@ class PaperStepSequencer:
 if __name__ == '__main__':
     pss = PaperStepSequencer()
     # pss.run_offline()
-    pss.run()
+
+    midi_process = Process(target=pss.run_midi)
+    midi_process.start()
+    cv_process = Process(target=pss.run)
+    cv_process.start()
+    midi_process.join()
+    cv_process.join()
+    # pss.run()
