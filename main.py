@@ -4,6 +4,7 @@ import numpy as np
 import os
 from threading import Thread
 import time
+import midiplayer
 
 
 class PaperStepSequencer:
@@ -31,11 +32,15 @@ class PaperStepSequencer:
         self.grid_square_size = 60
         # dimensionality of the grid
         self.grid_dim_xy = np.array([8, 4])
-        self.grid = np.zeros(self.grid_dim_xy.transpose(), dtype=np.uint8)
 
         self.bpm = 120
         self.steps_per_beats = 4
         self.sequencer_prev_step = -1
+        self.midiplayer = midiplayer.MidiPlayer()
+
+        self.entries = []
+        self.entries_grid = np.zeros(self.grid_dim_xy.transpose(), dtype=np.uint8)
+
 
 
     @staticmethod
@@ -200,13 +205,18 @@ class PaperStepSequencer:
         entries = (entries - self.grid_pos_xy) / self.grid_square_size
         entries = np.int32(np.floor(entries))
 
-        entries += 1
-        entries = [en for en in entries if min(en) >= 1]
-        entries = [en for en in entries if en[0] <= self.grid_dim_xy[0]]
-        entries = [en for en in entries if en[1] <= self.grid_dim_xy[1]]
+        # entries += 1
+        entries = [en for en in entries if min(en) >= 0]
+        entries = [en for en in entries if en[0] <= self.grid_dim_xy[0] -1]
+        entries = [en for en in entries if en[1] <= self.grid_dim_xy[1] -1]
+
+        if len(entries) == 0:
+            return [], frame_warped
+
+        print(entries)
 
         # recover top left corner of highlighted squares
-        squares_pos = np.array(entries) -1
+        squares_pos = np.array(entries)  # -1
         squares_pos = squares_pos * self.grid_square_size + self.grid_pos_xy
         # compute coordinates of 4 corners
         squares = []
@@ -226,12 +236,13 @@ class PaperStepSequencer:
         return entries, frame_warped
 
     def draw_current_step(self, frame_warped):
+
         frame_tmp = frame_warped.copy()
 
         # lets highlight a column:
         # recover top left corner of column
         x = self.grid_pos_xy[0] + self.sequencer_prev_step * self.grid_square_size
-        print("Camera self.sequencer_prev_step", self.sequencer_prev_step)
+        # print("Camera self.sequencer_prev_step", self.sequencer_prev_step)
         y = self.grid_pos_xy[1]
         dx = self.grid_square_size
         dy = self.grid_square_size * self.grid_dim_xy[1]
@@ -268,10 +279,16 @@ class PaperStepSequencer:
 
             # cv.waitKey(int(to_wait * 1000))
             time.sleep(to_wait)
+            self.midiplayer.note_off_all()
+
+            for entry in self.entries:
+                entry_step, percu_id = entry
+                if entry_step == step:
+                    self.midiplayer.note_on(percu_id)
 
             ts2 = time.time()
             tss.append(ts2)
-            print("Sequencer self.sequencer_prev_step", self.sequencer_prev_step)
+            # print("Sequencer self.sequencer_prev_step", self.sequencer_prev_step)
             # print("step:", self.sequencer_prev_step, ", to wait: ", to_wait)
 
     def process_frame(self, frame):
