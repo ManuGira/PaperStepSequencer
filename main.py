@@ -34,7 +34,7 @@ class PaperStepSequencer:
         self.grid = np.zeros(self.grid_dim_xy.transpose(), dtype=np.uint8)
 
         self.bpm = 120
-        self.prev_beat = 0
+        self.steps_per_beats = 4
 
 
     @staticmethod
@@ -226,15 +226,34 @@ class PaperStepSequencer:
         return entries, frame_warped
 
     def run_midi(self):
+        grid_length = self.grid_dim_xy[0]
+
         # unit in seconds
         one_step_period = 60/self.bpm/4
         full_grid_period = one_step_period*self.grid_dim_xy[0]
+        beat_period = 60 / self.bpm  # seconds (0.5)
+        one_step_period = beat_period / self.steps_per_beats  # (0.125)
+        full_grid_period = one_step_period * grid_length  # (2.0)
+
+        tss = []
+        prev_step = -1
         while True:
-            epoch = time.time()
-            ts = (epoch / period) % self.grid_dim_xy[0]
-            beat = int(ts+1)
-            print("midi: ", beat, ts, beat-ts)
-            time.sleep(beat-ts)
+            ts = time.time()
+            step_ts = (ts % full_grid_period) / one_step_period
+            step = int(step_ts)
+            if step == prev_step:
+                step += 1
+            if step % grid_length != (prev_step + 1) % grid_length:
+                print("ERROR")
+            prev_step = step
+            to_wait = (step + 1 - step_ts) * one_step_period
+
+            # cv.waitKey(int(to_wait * 1000))
+            time.sleep(to_wait)
+
+            ts2 = time.time()
+            tss.append(ts2)
+            print("step:", step, ", to wait: ", to_wait)
 
 
 
@@ -298,8 +317,6 @@ class PaperStepSequencer:
                 cv.imshow("Warped", frame_warped)
             else:
                 cv.imshow("Camera", frame)
-
-            self.run_midi()
 
             if update_requested and frame_is_valid:
                 update_requested = False
