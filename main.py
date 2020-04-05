@@ -35,6 +35,7 @@ class PaperStepSequencer:
 
         self.bpm = 120
         self.steps_per_beats = 4
+        self.sequencer_prev_step = -1
 
 
     @staticmethod
@@ -222,30 +223,47 @@ class PaperStepSequencer:
         frame_warped = np.uint8(0.5*np.float32(frame_warped) + 0.5*np.float32(frame_tmp))
 
         entries = [list(en) for en in entries]
-        print(entries)
         return entries, frame_warped
+
+    def draw_current_step(self, frame_warped):
+        frame_tmp = frame_warped.copy()
+
+        # lets highlight a column:
+        # recover top left corner of column
+        x = self.grid_pos_xy[0] + self.sequencer_prev_step * self.grid_square_size
+        print("Camera self.sequencer_prev_step", self.sequencer_prev_step)
+        y = self.grid_pos_xy[1]
+        dx = self.grid_square_size
+        dy = self.grid_square_size * self.grid_dim_xy[1]
+        rectangle_corners = np.array([
+            [     x,      y],
+            [x + dx,      y],
+            [x + dx, y + dy],
+            [     x, y + dy]
+        ])
+
+        cv.polylines(frame_tmp, [rectangle_corners], True, (0, 0, 255))
+        frame_warped = np.uint8(0.5 * np.float32(frame_warped) + 0.5 * np.float32(frame_tmp))
+        return frame_warped
 
     def run_midi(self):
         grid_length = self.grid_dim_xy[0]
 
         # unit in seconds
-        one_step_period = 60/self.bpm/4
-        full_grid_period = one_step_period*self.grid_dim_xy[0]
         beat_period = 60 / self.bpm  # seconds (0.5)
         one_step_period = beat_period / self.steps_per_beats  # (0.125)
         full_grid_period = one_step_period * grid_length  # (2.0)
 
         tss = []
-        prev_step = -1
         while True:
             ts = time.time()
             step_ts = (ts % full_grid_period) / one_step_period
             step = int(step_ts)
-            if step == prev_step:
+            if step == self.sequencer_prev_step:
                 step += 1
-            if step % grid_length != (prev_step + 1) % grid_length:
+            if step % grid_length != (self.sequencer_prev_step + 1) % grid_length:
                 print("ERROR")
-            prev_step = step
+            self.sequencer_prev_step = step
             to_wait = (step + 1 - step_ts) * one_step_period
 
             # cv.waitKey(int(to_wait * 1000))
@@ -253,9 +271,8 @@ class PaperStepSequencer:
 
             ts2 = time.time()
             tss.append(ts2)
-            print("step:", step, ", to wait: ", to_wait)
-
-
+            print("Sequencer self.sequencer_prev_step", self.sequencer_prev_step)
+            # print("step:", self.sequencer_prev_step, ", to wait: ", to_wait)
 
     def process_frame(self, frame):
         aruco_dict = cv.aruco.Dictionary_get(cv.aruco.DICT_4X4_50)
@@ -281,7 +298,8 @@ class PaperStepSequencer:
         if len(centers) > 0:
             self.entries, frame_warped = self.get_grid_inputs(centers, frame_warped)
 
-
+        # TODO: update squencer inputs on most recent available image
+        frame_warped = self.draw_current_step(frame_warped)
 
         # cv.imshow("warped.png", frame_warped)
         # cv.waitKey(0)
