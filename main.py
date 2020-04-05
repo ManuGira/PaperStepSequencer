@@ -2,7 +2,7 @@ import cv2 as cv
 import numpy as np
 # from PIL import Image
 import os
-from multiprocessing import Process
+from threading import Thread
 import time
 
 
@@ -338,14 +338,18 @@ class PaperStepSequencer:
         cam.release()
         cv.destroyAllWindows()
 
-if __name__ == '__main__':
+
+def main():
     pss = PaperStepSequencer()
     # pss.run_offline()
 
-    midi_process = Process(target=pss.run_midi)
+    midi_process = Thread(target=pss.run_midi)
     midi_process.start()
-    cv_process = Process(target=pss.run)
+
+    cv_process = Thread(target=pss.run)
     cv_process.start()
     midi_process.join()
     cv_process.join()
-    # pss.run()
+
+if __name__ == '__main__':
+    main()
