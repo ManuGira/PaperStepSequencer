@@ -18,15 +18,26 @@ class PaperStepSequencer:
 
         self.world_h = 480
         self.world_w = 710
-        self.margin = 60
-        self.corners_world = np.array([
-            [0, 0],
-            [self.world_w, 0],
-            [self.world_w, self.world_h],
-            [0, self.world_h]
+        self.marker_size = 60
+        # the order of the markers must match their ids
+        self.markers_world_posxy = np.array([
+            [                            0,                             0],
+            [self.world_w-self.marker_size,                             0],
+            [self.world_w-self.marker_size, self.world_h-self.marker_size],
+            [                            0, self.world_h-self.marker_size]
         ])
+        self.markers_corners_world = []
+        for posxy in self.markers_world_posxy:
+            x, y = posxy
+            d = self.marker_size
+            corners = [[    x,     y],
+                       [x + d,     y],
+                       [x + d, y + d],
+                       [    x, y + d]]
+            self.markers_corners_world.append(corners)
 
-        # top left corner of the grid
+
+                        # top left corner of the grid
         self.grid_pos_xy = np.array([160, 180])
         # size in warped pixel of a grid square
         self.grid_square_size = 60
@@ -59,39 +70,43 @@ class PaperStepSequencer:
             cv.imwrite(f"{markers_dir}/marker{ar_id}.png", markerImage)
         # return dictionary
 
-    @staticmethod
-    def detect_screen_corners(frame, aruco_dict, aruco_param, ar_ids):
+    def detect_screen_corners(self, frame, aruco_dict, aruco_param, ar_ids):
         # Detect the markers in the image
-        markerCorners, markerIds, rejectedCandidates = cv.aruco.detectMarkers(frame, aruco_dict, parameters=aruco_param)
+        marker_corners, detected_ids, rejectedCandidates = cv.aruco.detectMarkers(frame, aruco_dict, parameters=aruco_param)
 
-        if markerIds is None:
+        if detected_ids is None:
             print("markerIds is None")
-            return None
-        elif len(markerIds)==0:
+            return None, None
+        elif len(detected_ids)==0:
             print("len(markerIds)==0")
-            return None
+            return None, None
 
-        # filter out unknown markers
-        inds = [i for i, mid in enumerate(markerIds) if mid[0] in ar_ids]
-        markerCorners = [markerCorners[ind] for ind in inds]
-        markerIds = [markerIds[ind] for ind in inds]
+        # filter out unkown markers
+        inds = [i for i, mid in enumerate(detected_ids) if mid[0] in ar_ids]
+        marker_corners = [marker_corners[ind] for ind in inds]
+        detected_ids = [detected_ids[ind] for ind in inds]
 
-        markerCorners = [c[0] for c in markerCorners]
-        markerIds = [i[0] for i in markerIds]
+        if len(detected_ids)==0:
+            print("after filter len(markerIds)==0")
+            return None, None
 
-        if len(markerIds) != 4:
-            # print("missing:", set(ar_ids).difference(markerIds))
-            return None
-        if any([ar_id not in markerIds for ar_id in ar_ids]):
-            print("any([ar_id not in markerIds for ar_id in ar_ids])")
-            return None
+        # convert to flatten list
+        marker_corners = [c[0].tolist() for c in marker_corners]
+        detected_ids = [i[0] for i in detected_ids]
 
-        corners_screen = []
-        for i, ar_id in enumerate(ar_ids):
-            ind = markerIds.index(ar_id)
-            corners_screen.append(markerCorners[ind][i])
-        corners_screen = np.array(corners_screen)
-        return corners_screen
+        if any([ar_ids.count(ar_id) > 1 for ar_id in ar_ids]):
+            print("An aruco marker has been detected more than once")
+            return None, None
+
+        markers_corners_screen = []
+        markers_corners_world = []
+        for i, detected_id in enumerate(detected_ids):
+            ind = ar_ids.index(detected_id)
+            markers_corners_screen += marker_corners[i]
+            markers_corners_world += self.markers_corners_world[ind]
+        markers_corners_screen = np.array(markers_corners_screen)
+        markers_corners_world = np.array(markers_corners_world)
+        return markers_corners_screen, markers_corners_world
 
     @staticmethod
     def draw_screen_feedback(frame, corners_screen, corners_world, world_w, world_h):
@@ -307,27 +322,29 @@ class PaperStepSequencer:
             # print("Sequencer self.sequencer_prev_step", self.sequencer_prev_step)
             # print("step:", self.sequencer_prev_step, ", to wait: ", to_wait)
 
+    # def compute_homography(self, frame):
+
     def process_frame(self, frame):
         aruco_dict = cv.aruco.Dictionary_get(cv.aruco.DICT_4X4_50)
         aruco_param = cv.aruco.DetectorParameters_create()
 
         # detect area corner on the screen
-        corners_screen = PaperStepSequencer.detect_screen_corners(
+        corners_screen, corners_world = self.detect_screen_corners(
             frame, aruco_dict, aruco_param, self.ar_ids)
         if corners_screen is None:
             return None
 
         # draw grid on frame to make sure the area is well detected
         frame_feedback = PaperStepSequencer.draw_screen_feedback(
-            frame, corners_screen, self.corners_world, self.world_w, self.world_h)
+            frame, corners_screen, corners_world, self.world_w, self.world_h)
 
         # world to screen homography
-        w_from_s, status = cv.findHomography(corners_screen, self.corners_world)
+        w_from_s, status = cv.findHomography(corners_screen, corners_world)
         # Warp source image to destination based on homography
         margin = 60
         frame_warped = cv.warpPerspective(frame, w_from_s, (self.world_w, self.world_h))
 
-        frame_warped, centers = PaperStepSequencer.detect_coins(frame_warped, self.margin)
+        frame_warped, centers = PaperStepSequencer.detect_coins(frame_warped, self.marker_size)
         if len(centers) > 0:
             self.entries, frame_warped = self.get_grid_inputs(centers, frame_warped)
 
