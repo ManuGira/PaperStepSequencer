@@ -39,7 +39,7 @@ class PaperStepSequencer:
                        [    x, y + d]]
             self.markers_corners_world.append(corners)
 
-        self.stepRunner = steprunner.StepRunner(self.pixpermm)
+        self.stepRunner = steprunner.StepRunner(self.pixpermm, (self.world_w, self.world_h))
 
     @staticmethod
     def init_markers(ar_ids):
@@ -281,9 +281,12 @@ class PaperStepSequencer:
         if len(centers) > 0:
             self.stepRunner.entries, frame_warped = self.get_grid_inputs(centers, frame_warped)
 
-        # TODO: update squencer inputs on most recent available image
-        frame_warped = self.stepRunner.draw_current_step(frame_warped)
-
+        # TODO: update sequencer inputs on most recent available image
+        self.stepRunner.update_ar_content()
+        ar = self.stepRunner.ar_content
+        frame_warped[:, :, 0][ar > 0] = 0
+        frame_warped[:, :, 1][ar > 0] = 0
+        frame_warped[:, :, 2][ar > 0] = 255
         # cv.imshow("warped.png", frame_warped)
         # cv.waitKey(0)
         # cv.imwrite("output/warped.png", frame_warped)

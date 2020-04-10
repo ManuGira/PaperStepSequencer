@@ -4,20 +4,20 @@ import cv2 as cv
 import time
 
 class StepRunner:
-    def __init__(self, pixpermm):
+    def __init__(self, pixpermm, frame_shape):
         self.pixpermm = pixpermm
         # top left corner of the grid
         self.grid_pos_xy = np.array([16, 18]) * self.pixpermm
         self.grid_size_xy = np.array([48, 24])
 
-        self.nb_steps = np.array([16, 14, 8, 6])
+        self.nb_steps = np.array([16, 16, 16, 16])
         self.nb_rows = len(self.nb_steps)
 
         # size in warped pixel of a grid square
         self.grid_square_size_x = np.int32(self.grid_size_xy[0] / self.nb_steps * self.pixpermm)
         self.grid_square_size_y = np.int32(self.grid_size_xy[1] / self.nb_rows * self.pixpermm)
 
-        self.bpm = 120
+        self.bpm = 30
         self.beats_per_grid = 4
         self.full_grid_period = (60/self.bpm)*self.beats_per_grid  # should be 2s for 16 steps at 120bmp
 
@@ -29,10 +29,15 @@ class StepRunner:
         self.entries_grid = [[0]*nb_step for nb_step in self.nb_steps]
         self.entries_max_hit = 9
 
-    def draw_current_step(self, frame_warped):
+        self.ar_content = np.zeros(shape=frame_shape[::-1], dtype=np.uint8)
+        self.is_update_required = True
 
-        frame_tmp = frame_warped.copy()
-
+    def update_ar_content(self):
+        if not self.is_update_required:
+            return
+        self.is_update_required = False
+        self.ar_content *= 0
+        rectangle_corners_list = []
         # lets highlight a column:
         for k in range(self.nb_rows):
             # recover top left corner of rectangle
@@ -47,11 +52,9 @@ class StepRunner:
                 [x + dx, y + dy],
                 [     x, y + dy]
             ])
-
-            cv.polylines(frame_tmp, [rectangle_corners], True, (0, 0, 255), thickness=3)
-            frame_warped = np.uint8(0.5 * np.float32(frame_warped) + 0.5 * np.float32(frame_tmp))
-        return frame_warped
-
+            rectangle_corners_list.append(rectangle_corners)
+        cv.polylines(self.ar_content, rectangle_corners_list, True, (255,), thickness=3)
+        return
     def run(self):
         # grid_length = self.grid_dim_xy[0]
         #
@@ -79,7 +82,6 @@ class StepRunner:
         rdvs_times = sorted(list(agenda.keys()))
 
         ts0 = time.time()
-        tss = []
 
         current_rdv_id = -1
         while True:
@@ -87,6 +89,8 @@ class StepRunner:
 
             # which rows must be triggered now?
             rdv_time = rdvs_times[current_rdv_id]
+            if len(agenda[rdv_time])>0:
+                self.is_update_required = True
             for rdv in agenda[rdv_time]:
                 # increase row current steps and trigger its midi message
                 row, step = rdv["row_id"], rdv["step"]
@@ -101,29 +105,3 @@ class StepRunner:
             ts = (time.time()-ts0)
             sleep_duration = (next_rdv_time-ts)%self.full_grid_period
             time.sleep(sleep_duration)
-
-        # while True:
-        #     ts = time.time()-ts0
-        #     step_ts = (ts % self.full_grid_period)
-        #
-        #     step = int(step_ts)
-        #     if step == self.sequencer_prev_step:
-        #         step += 1
-        #     if step % grid_length != (self.sequencer_prev_step + 1) % grid_length:
-        #         print("ERROR")
-        #     to_wait = (step + 1 - step_ts) * one_step_period
-        #
-        #     # cv.waitKey(int(to_wait * 1000))
-        #     time.sleep(to_wait)
-        #     self.sequencer_prev_step = step
-        #     self.midiplayer.note_off_all()
-        #
-        #     for entry in self.entries:
-        #         entry_step, percu_id = entry
-        #         if entry_step == step:
-        #             self.midiplayer.note_on(percu_id)
-        #
-        #     ts2 = time.time()
-        #     tss.append(ts2)
-        #     # print("Sequencer self.sequencer_prev_step", self.sequencer_prev_step)
-        #     # print("step:", self.sequencer_prev_step, ", to wait: ", to_wait)
