@@ -3,8 +3,7 @@ import numpy as np
 # from PIL import Image
 import os
 from threading import Thread
-import time
-import midiplayer
+import steprunner
 
 
 class PaperStepSequencer:
@@ -16,9 +15,13 @@ class PaperStepSequencer:
         # Initialize the detector parameters using default values
         # self.aruco_param = cv.aruco.DetectorParameters_create()
 
-        self.world_h = 480
-        self.world_w = 710
-        self.marker_size = 60
+        self.w_from_s = np.diag([1.0, 1.0, 1.0])
+        self.s_from_w = np.diag([1.0, 1.0, 1.0])
+
+        self.pixpermm = 8
+        self.world_h = 48*self.pixpermm
+        self.world_w = 71*self.pixpermm
+        self.marker_size = 6*self.pixpermm
         # the order of the markers must match their ids
         self.markers_world_posxy = np.array([
             [                            0,                             0],
@@ -36,24 +39,7 @@ class PaperStepSequencer:
                        [    x, y + d]]
             self.markers_corners_world.append(corners)
 
-
-                        # top left corner of the grid
-        self.grid_pos_xy = np.array([160, 180])
-        # size in warped pixel of a grid square
-        self.grid_square_size = 60
-        # dimensionality of the grid
-        self.grid_dim_xy = np.array([8, 4])
-
-        self.bpm = 120
-        self.steps_per_beats = 4
-        self.sequencer_prev_step = -1
-        self.midiplayer = midiplayer.MidiPlayer()
-
-        self.entries = []
-        self.entries_grid = np.zeros(self.grid_dim_xy).transpose()
-        self.entries_max_hit = 9
-
-
+        self.stepRunner = steprunner.StepRunner(self.pixpermm)
 
     @staticmethod
     def init_markers(ar_ids):
@@ -86,7 +72,7 @@ class PaperStepSequencer:
         marker_corners = [marker_corners[ind] for ind in inds]
         detected_ids = [detected_ids[ind] for ind in inds]
 
-        if len(detected_ids)==0:
+        if len(detected_ids)<=1:
             print("after filter len(markerIds)==0")
             return None, None
 
@@ -108,25 +94,25 @@ class PaperStepSequencer:
         markers_corners_world = np.array(markers_corners_world)
         return markers_corners_screen, markers_corners_world
 
-    @staticmethod
-    def draw_screen_feedback(frame, corners_screen, corners_world, world_w, world_h):
+    def draw_screen_feedback(self, frame, corners_screen, corners_world, world_w, world_h):
         frame = frame.copy()
 
         s_from_w, status = cv.findHomography(corners_world, corners_screen)
+        self.s_from_w = self.s_from_w*0.9 + 0.1*s_from_w
         lines = []
-        for x in range(0, world_w + 1, 10):
+        for x in range(0, world_w + 1, self.pixpermm):
             pts_world = np.array([[x, 0, 1], [x, world_h, 1]])
 
-            pts_screen = np.dot(s_from_w, pts_world.transpose()).transpose()
+            pts_screen = np.dot(self.s_from_w, pts_world.transpose()).transpose()
             pts_screen = pts_screen / pts_screen[:, 2:3]
             pts_screen = pts_screen[:, :2]
 
             line = np.array(pts_screen, dtype=np.int32)
             lines.append(line)
-        for y in range(0, world_h + 1, 10):
+        for y in range(0, world_h + 1, self.pixpermm):
             pts_world = np.array([[0, y, 1], [world_w, y, 1]])
 
-            pts_screen = np.dot(s_from_w, pts_world.transpose()).transpose()
+            pts_screen = np.dot(self.s_from_w, pts_world.transpose()).transpose()
             pts_screen = pts_screen / pts_screen[:, 2:3]
             pts_screen = pts_screen[:, :2]
 
@@ -218,111 +204,52 @@ class PaperStepSequencer:
         frame_tmp = frame_warped.copy()
 
         entries = np.array(centers)
-        entries = (entries - self.grid_pos_xy) / self.grid_square_size
+        entries = (entries - self.stepRunner.grid_pos_xy) / self.stepRunner.grid_square_size_xy
         entries = np.int32(np.floor(entries))
 
         # entries += 1
         entries = [en for en in entries if min(en) >= 0]
-        entries = [en for en in entries if en[0] <= self.grid_dim_xy[0] -1]
-        entries = [en for en in entries if en[1] <= self.grid_dim_xy[1] -1]
+        entries = [en for en in entries if en[0] <= self.stepRunner.grid_dim_xy[0] -1]
+        entries = [en for en in entries if en[1] <= self.stepRunner.grid_dim_xy[1] -1]
 
-        print(centers)
-        print(entries)
         if len(entries) == 0:
             return [], frame_warped
 
         for entry in entries:
             ex, ey = entry
-            self.entries_grid[ey, ex] += 2
-        self.entries_grid -= 1
-        self.entries_grid[self.entries_grid < 0] = 0
-        self.entries_grid[self.entries_grid > self.entries_max_hit] = self.entries_max_hit
+            self.stepRunner.entries_grid[ey, ex] += 2
+        self.stepRunner.entries_grid -= 1
+        self.stepRunner.entries_grid[self.stepRunner.entries_grid < 0] = 0
+        self.stepRunner.entries_grid[self.stepRunner.entries_grid > self.stepRunner.entries_max_hit] = self.stepRunner.entries_max_hit
 
         entries = []
-        for ex in range(self.grid_dim_xy[0]):
-            for ey in range(self.grid_dim_xy[1]):
-                if self.entries_grid[ey, ex] >= self.entries_max_hit-3:
+        for ex in range(self.stepRunner.grid_dim_xy[0]):
+            for ey in range(self.stepRunner.grid_dim_xy[1]):
+                if self.stepRunner.entries_grid[ey, ex] >= self.stepRunner.entries_max_hit-3:
                     entries.append([ex, ey])
         if len(entries) == 0:
             return [], frame_warped
 
         # recover top left corner of highlighted squares
         squares_pos = np.array(entries)  # -1
-        squares_pos = squares_pos * self.grid_square_size + self.grid_pos_xy
+        squares_pos = squares_pos * self.stepRunner.grid_square_size_xy + self.stepRunner.grid_pos_xy
         # compute coordinates of 4 corners
         squares = []
         for sq in squares_pos:
             x, y = np.int32(sq)
-            d = np.int32(self.grid_square_size)
+            dx, dy = np.int32(self.stepRunner.grid_square_size_xy)
             square_corners = [[  x,   y],
-                       [x+d,   y],
-                       [x+d, y+d],
-                       [  x, y+d]
+                       [x+dx,   y],
+                       [x+dx, y+dy],
+                       [  x, y+dy]
                     ]
             squares.append(np.array(square_corners))
-        cv.polylines(frame_tmp, squares, True, (255, 0, 0))
+        cv.polylines(frame_tmp, squares, True, (255, 0, 0), thickness=3)
         frame_warped = np.uint8(0.5*np.float32(frame_warped) + 0.5*np.float32(frame_tmp))
 
         entries = [list(en) for en in entries]
         return entries, frame_warped
 
-    def draw_current_step(self, frame_warped):
-
-        frame_tmp = frame_warped.copy()
-
-        # lets highlight a column:
-        # recover top left corner of column
-        x = self.grid_pos_xy[0] + self.sequencer_prev_step * self.grid_square_size
-        # print("Camera self.sequencer_prev_step", self.sequencer_prev_step)
-        y = self.grid_pos_xy[1]
-        dx = self.grid_square_size
-        dy = self.grid_square_size * self.grid_dim_xy[1]
-        rectangle_corners = np.array([
-            [     x,      y],
-            [x + dx,      y],
-            [x + dx, y + dy],
-            [     x, y + dy]
-        ])
-
-        cv.polylines(frame_tmp, [rectangle_corners], True, (0, 0, 255))
-        frame_warped = np.uint8(0.5 * np.float32(frame_warped) + 0.5 * np.float32(frame_tmp))
-        return frame_warped
-
-    def run_midi(self):
-        grid_length = self.grid_dim_xy[0]
-
-        # unit in seconds
-        beat_period = 60 / self.bpm  # seconds (0.5)
-        one_step_period = beat_period / self.steps_per_beats  # (0.125)
-        full_grid_period = one_step_period * grid_length  # (2.0)
-
-        tss = []
-        while True:
-            ts = time.time()
-            step_ts = (ts % full_grid_period) / one_step_period
-            step = int(step_ts)
-            if step == self.sequencer_prev_step:
-                step += 1
-            if step % grid_length != (self.sequencer_prev_step + 1) % grid_length:
-                print("ERROR")
-            self.sequencer_prev_step = step
-            to_wait = (step + 1 - step_ts) * one_step_period
-
-            # cv.waitKey(int(to_wait * 1000))
-            time.sleep(to_wait)
-            self.midiplayer.note_off_all()
-
-            for entry in self.entries:
-                entry_step, percu_id = entry
-                if entry_step == step:
-                    self.midiplayer.note_on(percu_id)
-
-            ts2 = time.time()
-            tss.append(ts2)
-            # print("Sequencer self.sequencer_prev_step", self.sequencer_prev_step)
-            # print("step:", self.sequencer_prev_step, ", to wait: ", to_wait)
-
-    # def compute_homography(self, frame):
 
     def process_frame(self, frame):
         aruco_dict = cv.aruco.Dictionary_get(cv.aruco.DICT_4X4_50)
@@ -335,21 +262,22 @@ class PaperStepSequencer:
             return None
 
         # draw grid on frame to make sure the area is well detected
-        frame_feedback = PaperStepSequencer.draw_screen_feedback(
+        frame_feedback = self.draw_screen_feedback(
             frame, corners_screen, corners_world, self.world_w, self.world_h)
 
         # world to screen homography
         w_from_s, status = cv.findHomography(corners_screen, corners_world)
+        self.w_from_s = self.w_from_s*0.9 + 0.1*w_from_s
         # Warp source image to destination based on homography
         margin = 60
-        frame_warped = cv.warpPerspective(frame, w_from_s, (self.world_w, self.world_h))
+        frame_warped = cv.warpPerspective(frame, self.w_from_s, (self.world_w, self.world_h))
 
         frame_warped, centers = PaperStepSequencer.detect_coins(frame_warped, self.marker_size)
         if len(centers) > 0:
-            self.entries, frame_warped = self.get_grid_inputs(centers, frame_warped)
+            self.stepRunner.entries, frame_warped = self.get_grid_inputs(centers, frame_warped)
 
         # TODO: update squencer inputs on most recent available image
-        frame_warped = self.draw_current_step(frame_warped)
+        frame_warped = self.stepRunner.draw_current_step(frame_warped)
 
         # cv.imshow("warped.png", frame_warped)
         # cv.waitKey(0)
@@ -357,8 +285,10 @@ class PaperStepSequencer:
 
         return frame_feedback, frame_warped
 
-    def run(self):
-        cam = cv.VideoCapture(0)
+    def run(self, online=True):
+        if online:
+            cam = cv.VideoCapture(0)
+            ret, frame = cam.read()
 
         cv.namedWindow("Camera")
         cv.namedWindow("Warped")
@@ -368,14 +298,14 @@ class PaperStepSequencer:
         update_requested = False
         frame_is_valid = True
 
-        ret, frame = cam.read()
-
         while True:
-            ret, frame = cam.read()
-            if not ret:
-                break
-
-            frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+            if online:
+                ret, frame = cam.read()
+                if not ret:
+                    break
+                frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+            else:
+                frame = cv.imread("frames/frame0.jpg", 0)
 
             ret = self.process_frame(frame)
             frame_is_valid = ret is not None
@@ -411,11 +341,13 @@ def main():
     pss = PaperStepSequencer()
     # pss.run_offline()
 
-    midi_process = Thread(target=pss.run_midi)
+
+    cv_process = Thread(target=pss.run, kwargs={"online": False})
+    cv_process.start()
+
+    midi_process = Thread(target=pss.stepRunner.run)
     midi_process.start()
 
-    cv_process = Thread(target=pss.run)
-    cv_process.start()
     midi_process.join()
     cv_process.join()
 
