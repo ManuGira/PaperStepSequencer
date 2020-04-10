@@ -211,48 +211,35 @@ class PaperStepSequencer:
             return [], frame_warped
 
         centers = np.array(centers)
-        entry_rows = (centers[:, 1] - self.stepRunner.grid_size_xy[1]) / self.stepRunner.grid_square_size_y
+        entry_rows = (centers[:, 1] - self.stepRunner.grid_pos_xy[1]) / self.stepRunner.grid_square_size_y
         entry_rows = np.int32(np.floor(entry_rows))
 
-        entry_steps = (centers[:, 0] - self.stepRunner.grid_size_xy[0]) / self.stepRunner.grid_square_size_x
+        entry_steps = (centers[:, 0] - self.stepRunner.grid_pos_xy[0]) / self.stepRunner.grid_square_size_x[entry_rows]
         entry_steps = np.int32(np.floor(entry_steps))
 
-        entries = np.concatenate((entry_rows, entry_steps), axis=1)
+        entry_rows.shape += (1,)
+        entry_steps.shape += (1,)
+        entries = np.column_stack((entry_rows, entry_steps))
 
         print("akpwjerbf")
         for entry in entries:
-            ex, ey = entry
-            self.stepRunner.entries_grid[ey, ex] += 2
-        self.stepRunner.entries_grid -= 1
-        self.stepRunner.entries_grid[self.stepRunner.entries_grid < 0] = 0
-        self.stepRunner.entries_grid[self.stepRunner.entries_grid > self.stepRunner.entries_max_hit] = self.stepRunner.entries_max_hit
+            row, step = entry
+            self.stepRunner.entries_grid[row][step] += 2
 
         entries = []
-        for ex in range(self.stepRunner.grid_dim_xy[0]):
-            for ey in range(self.stepRunner.grid_dim_xy[1]):
-                if self.stepRunner.entries_grid[ey, ex] >= self.stepRunner.entries_max_hit-3:
-                    entries.append([ex, ey])
+        for row in range(self.stepRunner.nb_rows):
+            for step in range(self.stepRunner.nb_steps[row]):
+                self.stepRunner.entries_grid[row][step] -= 1
+                self.stepRunner.entries_grid[row][step] = max(self.stepRunner.entries_grid[row][step], 0)
+                self.stepRunner.entries_grid[row][step] = min(self.stepRunner.entries_grid[row][step], self.stepRunner.entries_max_hit)
+                if self.stepRunner.entries_grid[row][step] >= self.stepRunner.entries_max_hit-3:
+                    entries.append([row, step])
+
         if len(entries) == 0:
             return [], frame_warped
 
-        # recover top left corner of highlighted squares
-        squares_pos = np.array(entries)  # -1
-        squares_pos = squares_pos * self.stepRunner.grid_square_size_xy + self.stepRunner.grid_pos_xy
-        # compute coordinates of 4 corners
-        squares = []
-        for sq in squares_pos:
-            x, y = np.int32(sq)
-            dx, dy = np.int32(self.stepRunner.grid_square_size_xy)
-            square_corners = [[  x,   y],
-                       [x+dx,   y],
-                       [x+dx, y+dy],
-                       [  x, y+dy]
-                    ]
-            squares.append(np.array(square_corners))
-        cv.polylines(frame_tmp, squares, True, (255, 0, 0), thickness=3)
-        frame_warped = np.uint8(0.5*np.float32(frame_warped) + 0.5*np.float32(frame_tmp))
-
-        entries = [list(en) for en in entries]
+        rectangles = self.stepRunner.get_entries_rectangles(entries)
+        cv.polylines(frame_warped, rectangles, True, (255, 0, 0), thickness=3)
         return entries, frame_warped
 
 

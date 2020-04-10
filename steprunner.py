@@ -8,14 +8,14 @@ class StepRunner:
         self.pixpermm = pixpermm
         # top left corner of the grid
         self.grid_pos_xy = np.array([16, 18]) * self.pixpermm
-        self.grid_size_xy = np.array([48, 24])
+        self.grid_size_xy = np.array([48, 24]) * self.pixpermm
 
-        self.nb_steps = np.array([16, 16, 16, 16])
+        self.nb_steps = np.array([16, 16, 14, 7])
         self.nb_rows = len(self.nb_steps)
 
         # size in warped pixel of a grid square
-        self.grid_square_size_x = np.int32(self.grid_size_xy[0] / self.nb_steps * self.pixpermm)
-        self.grid_square_size_y = np.int32(self.grid_size_xy[1] / self.nb_rows * self.pixpermm)
+        self.grid_square_size_x = np.int32(self.grid_size_xy[0] / self.nb_steps)
+        self.grid_square_size_y = np.int32(self.grid_size_xy[1] / self.nb_rows)
 
         self.bpm = 30
         self.beats_per_grid = 4
@@ -30,22 +30,49 @@ class StepRunner:
         self.entries_max_hit = 9
 
         self.ar_content = np.zeros(shape=frame_shape[::-1], dtype=np.uint8)
+        self.ar_content_constant = np.zeros(shape=frame_shape[::-1], dtype=np.uint8)
         self.is_update_required = True
+        self.init_ar_content_constant()
+
+    def get_entries_rectangles(self, entries):
+        rectangles = []
+        for row_step in entries:
+            row, step = row_step
+            dx = self.grid_square_size_x[row]
+            dy = self.grid_square_size_y
+            y = self.grid_pos_xy[1] + row * dy
+            x = self.grid_pos_xy[0] + step * dx
+            rect = np.array([
+                [x, y],
+                [x + dx, y],
+                [x + dx, y + dy],
+                [x, y + dy]], dtype=np.int32)
+            rectangles.append(rect)
+        return rectangles
+
+    def init_ar_content_constant(self):
+        all_entries = []
+        for row, nb_steps in enumerate(self.nb_steps):
+            for step in range(nb_steps):
+                entry = [row, step]
+                all_entries.append(entry)
+        rectangles = self.get_entries_rectangles(all_entries)
+        cv.polylines(self.ar_content_constant, rectangles, True, (255,), thickness=1)
 
     def update_ar_content(self):
         if not self.is_update_required:
             return
         self.is_update_required = False
-        self.ar_content *= 0
+        self.ar_content = self.ar_content_constant.copy()
         rectangle_corners_list = []
         # lets highlight a column:
         for k in range(self.nb_rows):
-            # recover top left corner of rectangle
-            x = np.int32(self.grid_pos_xy[0] + self.rows_current_step[k] * self.grid_square_size_x[k])
-            # print("Camera self.sequencer_prev_step", self.sequencer_prev_step)
-            y = np.int32(self.grid_pos_xy[1] + self.grid_square_size_y*k)
             dx = self.grid_square_size_x[k]
             dy = self.grid_square_size_y
+            # recover top left corner of rectangle
+            x = np.int32(self.grid_pos_xy[0] + self.rows_current_step[k] * dx)
+            # print("Camera self.sequencer_prev_step", self.sequencer_prev_step)
+            y = np.int32(self.grid_pos_xy[1] + dy*k)
             rectangle_corners = np.array([
                 [     x,      y],
                 [x + dx,      y],
@@ -55,6 +82,7 @@ class StepRunner:
             rectangle_corners_list.append(rectangle_corners)
         cv.polylines(self.ar_content, rectangle_corners_list, True, (255,), thickness=3)
         return
+
     def run(self):
         # grid_length = self.grid_dim_xy[0]
         #
@@ -105,3 +133,4 @@ class StepRunner:
             ts = (time.time()-ts0)
             sleep_duration = (next_rdv_time-ts)%self.full_grid_period
             time.sleep(sleep_duration)
+
