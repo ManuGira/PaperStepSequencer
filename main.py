@@ -203,18 +203,23 @@ class PaperStepSequencer:
     def get_grid_inputs(self, centers, frame_warped):
         frame_tmp = frame_warped.copy()
 
-        entries = np.array(centers)
-        entries = (entries - self.stepRunner.grid_pos_xy) / self.stepRunner.grid_square_size_xy
-        entries = np.int32(np.floor(entries))
-
-        # entries += 1
-        entries = [en for en in entries if min(en) >= 0]
-        entries = [en for en in entries if en[0] <= self.stepRunner.grid_dim_xy[0] -1]
-        entries = [en for en in entries if en[1] <= self.stepRunner.grid_dim_xy[1] -1]
-
-        if len(entries) == 0:
+        # filter out centers out of grid
+        minx, miny = self.stepRunner.grid_pos_xy
+        maxx, maxy = self.stepRunner.grid_pos_xy+self.stepRunner.grid_size_xy
+        centers = [c for c in centers if minx < c[0] < maxx and miny < c[1] < maxy]
+        if len(centers) == 0:
             return [], frame_warped
 
+        centers = np.array(centers)
+        entry_rows = (centers[:, 1] - self.stepRunner.grid_size_xy[1]) / self.stepRunner.grid_square_size_y
+        entry_rows = np.int32(np.floor(entry_rows))
+
+        entry_steps = (centers[:, 0] - self.stepRunner.grid_size_xy[0]) / self.stepRunner.grid_square_size_x
+        entry_steps = np.int32(np.floor(entry_steps))
+
+        entries = np.concatenate((entry_rows, entry_steps), axis=1)
+
+        print("akpwjerbf")
         for entry in entries:
             ex, ey = entry
             self.stepRunner.entries_grid[ey, ex] += 2
