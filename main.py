@@ -221,7 +221,6 @@ class PaperStepSequencer:
         entry_steps.shape += (1,)
         entries = np.column_stack((entry_rows, entry_steps))
 
-        print("akpwjerbf")
         for entry in entries:
             row, step = entry
             self.stepRunner.entries_grid[row][step] += 2
@@ -293,14 +292,16 @@ class PaperStepSequencer:
         update_requested = False
         frame_is_valid = True
 
+        c = -1
         while True:
+            c = (c+1)%100
             if online:
                 ret, frame = cam.read()
                 if not ret:
                     break
                 frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
             else:
-                frame = cv.imread("frames/frame0.jpg", 0)
+                frame = cv.imread(f"frames/opencv_frame_{c%3}.png", 0)
 
             ret = self.process_frame(frame)
             frame_is_valid = ret is not None
