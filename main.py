@@ -237,8 +237,8 @@ class PaperStepSequencer:
         if len(entries) == 0:
             return [], frame_warped
 
-        rectangles = self.stepRunner.get_entries_rectangles(entries)
-        cv.polylines(frame_warped, rectangles, True, (255, 0, 0), thickness=3)
+        pts_list = self.stepRunner.get_entries_halfcircle(entries)
+        cv.fillPoly(frame_warped, pts_list, (255,0,0))
         return entries, frame_warped
 
 
