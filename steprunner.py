@@ -97,6 +97,7 @@ class StepRunner:
         agenda = {}
         for row, nb_step in enumerate(self.nb_steps):
             times = self.full_grid_period*np.arange(nb_step)/nb_step
+            times = np.round(times, decimals=10)  # rough round to avoid rounding errors
             for step, rdv_time in enumerate(times):
                 # for each rdv time, we want to know which rows is involved, and which step it is for this row
                 if rdv_time not in agenda.keys():
